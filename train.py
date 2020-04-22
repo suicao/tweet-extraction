@@ -13,7 +13,7 @@ import numpy as np
 import pickle
 import os
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from transformers import *
 import torch
@@ -29,8 +29,10 @@ from models import *
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--fold', type=int, default=0)
 parser.add_argument('--train_full', action='store_true')
-parser.add_argument('--use_only', type=str, default='all')
 parser.add_argument('--ignore_neutral', action='store_true')
+parser.add_argument('--stratified', action='store_true')
+parser.add_argument('--use_only', type=str, default='all')
+parser.add_argument('--devices', default='7')
 parser.add_argument('--lr', type=float, default=2e-5)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--beam_size', type=int, default=5)
@@ -46,7 +48,8 @@ parser.add_argument('--model', type=str, default="roberta")
 
 args = parser.parse_args()
 
-SEED = args.seed
+os.environ['CUDA_VISIBLE_DEVICES'] = args.devices
+SEED = args.seed + args.fold
 EPOCHS = args.epochs 
 
 lr=args.lr
@@ -60,6 +63,12 @@ torch.backends.cudnn.deterministic = True
 if args.model == "roberta":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-base', output_hidden_states=True)
+if args.model == "roberta-squad":
+    tokenizer = RobertaTokenizer.from_pretrained("deepset/roberta-base-squad2")
+    model = RobertaForSentimentExtraction.from_pretrained("deepset/roberta-base-squad2", output_hidden_states=True)
+if args.model == "bart":
+    tokenizer = BartTokenizer.from_pretrained('bart-large')
+    model = BartForSentimentExtraction.from_pretrained('bart-large', output_hidden_states=True)
 elif args.model == "xlnet":
     tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
     model = XLNetForSentimentExtraction.from_pretrained('xlnet-base-cased', output_hidden_states=True)
@@ -79,7 +88,11 @@ elif args.model == "roberta-detector":
 model.cuda()
 
 train_df = pd.read_csv("data/train.csv")
-train_df.fillna("neutral stuff",inplace=True)
+train_df.fillna("NaN",inplace=True)
+#train_df.text = train_df.text.apply(lambda x: x.replace("`","'"))
+#train_df.selected_text = train_df.selected_text.apply(lambda x: x.replace("`","'"))
+#train_df["orig_selected_text"] = train_df.selected_text.values
+
 print(f"Training on {args.use_only}")
 if args.ignore_neutral or args.use_only not in ["all","neutral"]:
     train_df = train_df[train_df.sentiment != "neutral"].reset_index()
@@ -89,12 +102,6 @@ if args.model not in ["xlnet","xlnet-large"]:
 else:
     X_train, X_type_train, X_pos_train = convert_lines_xlnet(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
 
-'''
-X_start_train = np.zeros((len(X_train), args.max_sequence_length))
-X_start_train[:, X_pos_train[:,0].astype(np.int)] = 1
-X_end_train = np.zeros((len(X_train), args.max_sequence_length))
-X_end_train[:, X_pos_train[:,1].astype(np.int)] = 1
-'''
 sentiment_dict = {"negative": 0, "neutral": 1, "positive": 2}
 y_train = np.array([sentiment_dict[x] for x in train_df.sentiment.values])
 
@@ -112,16 +119,22 @@ scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_
 scheduler0 = get_constant_schedule(optimizer)
 model = nn.DataParallel(model)
 
+if args.model in ["bart"]:
+    tsfm = model.module.model
 if args.model in ["xlm","xlnet","gpt2","xlnet-large"]:
     tsfm = model.module.transformer
 if args.model in ["bert","bert-mrpc","bert-large","bert-large-whole-word-masking"]:
     tsfm = model.module.bert
 if args.model in ["albert"]:
     tsfm = model.module.albert
-if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large"]:
+if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large","roberta-squad"]:
     tsfm = model.module.roberta
 
-splits = list(KFold(n_splits=5, shuffle=True, random_state=SEED).split(X_train, np.arange(len(X_train))))
+if not args.stratified:
+    splits = list(KFold(n_splits=5, shuffle=True, random_state=args.seed).split(X_train, np.arange(len(X_train))))
+else:
+    print("Using stratified KFold")
+    splits = list(StratifiedKFold(n_splits=5, shuffle=True, random_state=args.seed).split(X_train, y_train))
 
 for fold, (train_idx, val_idx) in enumerate(splits):
     print("Training for fold {}".format(fold))

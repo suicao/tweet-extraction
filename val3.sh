@@ -1,0 +1,5 @@
+python train.py  --model bart  --batch_size 32 --accumulation_steps 3 --fold 0 --seed 14 --epochs 3 --beam_size 3 --devices '2,3,4,5' 
+python train.py  --model bart  --batch_size 32 --accumulation_steps 3 --fold 1 --seed 14 --epochs 3 --beam_size 3 --devices '2,3,4,5' 
+python train.py  --model bart  --batch_size 32 --accumulation_steps 3 --fold 2 --seed 14 --epochs 3 --beam_size 3 --devices '2,3,4,5' 
+python train.py  --model bart  --batch_size 32 --accumulation_steps 3 --fold 3 --seed 14 --epochs 3 --beam_size 3 --devices '2,3,4,5' 
+python train.py  --model bart  --batch_size 32 --accumulation_steps 3 --fold 4 --seed 14 --epochs 3 --beam_size 3 --devices '2,3,4,5' 
