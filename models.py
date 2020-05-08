@@ -113,8 +113,8 @@ class RobertaForSentimentExtraction(BertPreTrainedModel):
         else:
             # during inference, compute the end logits based on beam search
             bsz, slen, hsz = hidden_states.size()
-#            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
-            start_log_probs = F.sigmoid(start_logits)
+            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
+#            start_log_probs = F.sigmoid(start_logits)
 
             start_top_log_probs, start_top_index = torch.topk(
                 start_log_probs, beam_size, dim=-1
@@ -128,8 +128,8 @@ class RobertaForSentimentExtraction(BertPreTrainedModel):
             )  # shape (bsz, slen, start_n_top, hsz)
             p_mask = p_mask.unsqueeze(-1) if p_mask is not None else None
             end_logits = self.end_logits(hidden_states_expanded, start_states=start_states, p_mask=p_mask)
-#            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
-            end_log_probs = F.sigmoid(end_logits)
+            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
+#            end_log_probs = F.sigmoid(end_logits)
 
             end_top_log_probs, end_top_index = torch.topk(
                 end_log_probs, beam_size, dim=1
@@ -198,8 +198,7 @@ class XLNetForSentimentExtraction(XLNetPreTrainedModel):
         else:
             # during inference, compute the end logits based on beam search
             bsz, slen, hsz = hidden_states.size()
-#            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
-            start_log_probs = F.sigmoid(start_logits)
+            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
 
             start_top_log_probs, start_top_index = torch.topk(
                 start_log_probs, beam_size, dim=-1
@@ -213,8 +212,7 @@ class XLNetForSentimentExtraction(XLNetPreTrainedModel):
             )  # shape (bsz, slen, start_n_top, hsz)
             p_mask = p_mask.unsqueeze(-1) if p_mask is not None else None
             end_logits = self.end_logits(hidden_states_expanded, start_states=start_states, p_mask=p_mask)
-#            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
-            end_log_probs = F.sigmoid(end_logits)
+            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
 
             end_top_log_probs, end_top_index = torch.topk(
                 end_log_probs, beam_size, dim=1
@@ -271,8 +269,7 @@ class BartForSentimentExtraction(PretrainedBartModel):
         else:
             # during inference, compute the end logits based on beam search
             bsz, slen, hsz = hidden_states.size()
-#            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
-            start_log_probs = F.sigmoid(start_logits)
+            start_log_probs = F.softmax(start_logits, dim=-1)  # shape (bsz, slen)
 
             start_top_log_probs, start_top_index = torch.topk(
                 start_log_probs, beam_size, dim=-1
@@ -286,8 +283,7 @@ class BartForSentimentExtraction(PretrainedBartModel):
             )  # shape (bsz, slen, start_n_top, hsz)
             p_mask = p_mask.unsqueeze(-1) if p_mask is not None else None
             end_logits = self.end_logits(hidden_states_expanded, start_states=start_states, p_mask=p_mask)
-#            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
-            end_log_probs = F.sigmoid(end_logits)
+            end_log_probs = F.softmax(end_logits, dim=1)  # shape (bsz, slen, start_n_top)
 
             end_top_log_probs, end_top_index = torch.topk(
                 end_log_probs, beam_size, dim=1

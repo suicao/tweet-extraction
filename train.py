@@ -11,21 +11,9 @@ from torch import nn
 import json
 import numpy as np
 import pickle
-import os
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import KFold, StratifiedKFold
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
-from transformers import *
-import torch
-import torch.utils.data
-import torch.nn.functional as F
-from torch.optim import Adagrad, Adamax
-from transformers.modeling_utils import * 
-import argparse
-from scipy.stats import spearmanr
-from utils import *
-from models import *
 
+import os
+import argparse
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--fold', type=int, default=0)
 parser.add_argument('--train_full', action='store_true')
@@ -47,8 +35,21 @@ parser.add_argument('--pretrained_path', type=str, default=None)
 parser.add_argument('--model', type=str, default="roberta")
 
 args = parser.parse_args()
-
 os.environ['CUDA_VISIBLE_DEVICES'] = args.devices
+
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from transformers import *
+import torch
+import torch.utils.data
+import torch.nn.functional as F
+from torch.optim import Adagrad, Adamax
+from transformers.modeling_utils import * 
+from scipy.stats import spearmanr
+from utils import *
+from models import *
+
 SEED = args.seed + args.fold
 EPOCHS = args.epochs 
 
@@ -117,18 +118,17 @@ num_train_optimization_steps = int(EPOCHS*len(train_df)/batch_size/accumulation_
 optimizer = AdamW(optimizer_grouped_parameters, lr=lr, correct_bias=False) 
 scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps)  # PyTorch scheduler
 scheduler0 = get_constant_schedule(optimizer)
-model = nn.DataParallel(model)
 
 if args.model in ["bart"]:
-    tsfm = model.module.model
+    tsfm = model.model
 if args.model in ["xlm","xlnet","gpt2","xlnet-large"]:
-    tsfm = model.module.transformer
+    tsfm = model.transformer
 if args.model in ["bert","bert-mrpc","bert-large","bert-large-whole-word-masking"]:
-    tsfm = model.module.bert
+    tsfm = model.bert
 if args.model in ["albert"]:
-    tsfm = model.module.albert
+    tsfm = model.albert
 if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large","roberta-squad"]:
-    tsfm = model.module.roberta
+    tsfm = model.roberta
 
 if not args.stratified:
     splits = list(KFold(n_splits=5, shuffle=True, random_state=args.seed).split(X_train, np.arange(len(X_train))))
@@ -152,12 +152,6 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 torch.tensor(X_pos_train[train_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[train_idx, 1],dtype=torch.long)) #,torch.tensor(y_train[train_idx],dtype=torch.long))
     valid_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[val_idx],dtype=torch.long), torch.tensor(X_type_train[val_idx],dtype=torch.long),\
                 torch.tensor(X_pos_train[val_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[val_idx,1],dtype=torch.long))
-    '''
-    train_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[train_idx],dtype=torch.long),torch.tensor(X_type_train[train_idx],dtype=torch.long),\
-                torch.tensor(X_start_train[train_idx],dtype=torch.float), torch.tensor(X_end_train[train_idx],dtype=torch.float)) #,torch.tensor(y_train[train_idx],dtype=torch.long))
-    valid_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[val_idx],dtype=torch.long), torch.tensor(X_type_train[val_idx],dtype=torch.long),\
-                torch.tensor(X_start_train[val_idx],dtype=torch.float), torch.tensor(X_end_train[val_idx],dtype=torch.float))
-    '''
     best_score = 0
     tq = tqdm(range(args.stop_after + 1))
     for child in tsfm.children():
@@ -193,7 +187,7 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 p_mask[:,:3] = 1.0
 
             loss = model(input_ids=x_batch.cuda(), start_positions = x_start_batch.cuda(), end_positions = x_end_batch.cuda(), \
-                                    attention_mask=attention_mask, token_type_ids=x_type_batch.cuda(),p_mask=None) #,cls_ids=y_batch)
+                                    attention_mask=attention_mask, token_type_ids=x_type_batch.cuda(),p_mask=p_mask.cuda()) #,cls_ids=y_batch)
             loss /= accumulation_steps
             loss = loss.mean()
             loss.backward()
@@ -207,7 +201,6 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         if args.train_full or epoch < args.stop_after:
             continue
         model.eval()
-#        model.load_state_dict(torch.load("models/{}_{}_{}.bin".format(args.model, fold,args.use_only)))
         true_texts = train_df.loc[val_idx].selected_text.values
         selected_texts = []
         start_end_idxs = []
@@ -225,7 +218,7 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 attention_mask=(x_batch != tokenizer.pad_token_id).cuda()
                 p_mask[:,:3] = 1.0
             start_top_log_probs, start_top_index, end_top_log_probs, end_top_index = model(input_ids=x_batch.cuda(), attention_mask= attention_mask, \
-                                                                                            token_type_ids=x_type_batch.cuda(),p_mask = None, beam_size=args.beam_size)
+                                                                                            token_type_ids=x_type_batch.cuda(),p_mask = p_mask.cuda(), beam_size=args.beam_size)
             start_top_log_probs = start_top_log_probs.detach().cpu().numpy()
             end_top_log_probs = end_top_log_probs.detach().cpu().numpy()
             start_top_index = start_top_index.detach().cpu().numpy()
@@ -248,4 +241,3 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         matched_texts = [y if y in x else fuzzy_match(x,y)[1] for x,y in zip(train_df.loc[val_idx].text.values, selected_texts)]
         matched_scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, matched_texts)]
         print(f"\nRaw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}")
-#        torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.use_only))

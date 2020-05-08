@@ -64,7 +64,7 @@ def find_best_combinations(start_top_log_probs, start_top_index, end_top_log_pro
     for i in range(len(start_top_log_probs)):
         for j in range(end_top_log_probs.shape[0]):
             if valid_start <= start_top_index[i] < valid_end and valid_start <= end_top_index[j,i] < valid_end and start_top_index[i] < end_top_index[j,i]:
-                score = start_top_log_probs[i] + end_top_log_probs[j,i]
+                score = start_top_log_probs[i] * end_top_log_probs[j,i]
                 if score > best_score:
                     best = (start_top_index[i],end_top_index[j,i])
                     best_score = score
