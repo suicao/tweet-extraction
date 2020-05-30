@@ -97,18 +97,18 @@ if args.ignore_neutral or args.use_only not in ["all","neutral"]:
     train_df = train_df[train_df.sentiment != "neutral"].reset_index()
     #print(train_df.head())
 
-if os.path.exists(f"./data/X_train_{args.model}.npy"):
+if os.path.exists(f"./data/X_train_{args.model}_old.npy"):
     print("Loading cached input ids")
-    X_train, X_type_train, X_pos_train = np.load(f"./data/X_train_{args.model}.npy"), np.load(f"./data/X_type_train_{args.model}.npy"), np.load(f"./data/X_pos_train_{args.model}.npy")
+    X_train, X_type_train, X_pos_train = np.load(f"./data/X_train_{args.model}_old.npy"), np.load(f"./data/X_type_train_{args.model}_old.npy"), np.load(f"./data/X_pos_train_{args.model}_old.npy")
 else:
     print("Creating input ids")
     if args.model not in ["xlnet","xlnet-large"]:
-        X_train, X_type_train, X_pos_train = convert_lines_v2(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
+        X_train, X_type_train, X_pos_train = convert_lines(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
     else:
         X_train, X_type_train, X_pos_train = convert_lines_xlnet(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
-    np.save(f"./data/X_train_{args.model}.npy", X_train) 
-    np.save(f"./data/X_type_train_{args.model}.npy", X_type_train)
-    np.save(f"./data/X_pos_train_{args.model}.npy", X_pos_train)
+    np.save(f"./data/X_train_{args.model}_old.npy", X_train) 
+    np.save(f"./data/X_type_train_{args.model}_old.npy", X_type_train)
+    np.save(f"./data/X_pos_train_{args.model}_old.npy", X_pos_train)
 
 sentiment_dict = {"negative": 0, "neutral": 1, "positive": 2}
 y_train = np.array([sentiment_dict[x] for x in train_df.sentiment.values])
@@ -208,10 +208,10 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 if not frozen:
                     scheduler.step()
             pbar.set_postfix(loss = loss.item()*accumulation_steps)
-        torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
+        torch.save(model.state_dict(),"models/{}_{}_{}_old.bin".format(args.model, fold,args.seed))
         if args.train_full or epoch < args.stop_after:
             continue
-        model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
+#        model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
         model.eval()
         true_texts = train_df.loc[val_idx].selected_text.values
         selected_texts = []
@@ -245,11 +245,10 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 best_start, best_end = find_best_combinations(start_top_log_probs[i_], start_top_index[i_], \
                                                                 end_top_log_probs[i_].reshape(args.beam_size,args.beam_size), end_top_index[i_].reshape(args.beam_size,args.beam_size), \
                                                                 valid_start = valid_start, valid_end = real_length)
-                selected_text = tokenizer.decode([w for w in x[best_start:best_end] if w != tokenizer.pad_token_id], clean_up_tokenization_spaces=False)
+                selected_text = tokenizer.decode([w for w in x[best_start:best_end] if w != tokenizer.pad_token_id])
                 selected_texts.append(selected_text.strip())
         scores = []
         scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, selected_texts)]
         matched_texts = [y if y in x else fuzzy_match(x,y)[1] for x,y in zip(train_df.loc[val_idx].text.values, selected_texts)]
         matched_scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, matched_texts)]
         print(f"\nRaw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}")
-        break
