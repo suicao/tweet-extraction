@@ -18,6 +18,7 @@ parser.add_argument('--fold', type=int, default=0)
 parser.add_argument('--train_full', action='store_true')
 parser.add_argument('--ignore_neutral', action='store_true')
 parser.add_argument('--holdout', action='store_true')
+parser.add_argument('--remove_bad_samples', action='store_true')
 parser.add_argument('--stratified', action='store_true')
 parser.add_argument('--use_only', type=str, default='all')
 parser.add_argument('--devices', default='7')
@@ -65,6 +66,9 @@ torch.backends.cudnn.deterministic = True
 if args.model == "roberta":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-base', output_hidden_states=True)
+if args.model == "longformer":
+    tokenizer = LongformerTokenizer.from_pretrained('allenai/longformer-base-4096')
+    model = LongformerForSentimentExtraction.from_pretrained('allenai/longformer-base-4096', output_hidden_states=True)
 if args.model == "roberta-squad":
     tokenizer = RobertaTokenizer.from_pretrained("deepset/roberta-base-squad2")
     model = RobertaForSentimentExtraction.from_pretrained("deepset/roberta-base-squad2", output_hidden_states=True)
@@ -84,13 +88,21 @@ elif args.model == "roberta-large":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-large')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-large', output_hidden_states=True)
 elif args.model == "roberta-detector":
-    tokenizer = RobertaTokenizer.from_pretrained('roberta-large-openai-detector')
-    model = RobertaForSentimentExtraction.from_pretrained('roberta-large-openai-detector', output_hidden_states=True)
+    tokenizer = RobertaTokenizer.from_pretrained('roberta-base-openai-detector')
+    model = RobertaForSentimentExtraction.from_pretrained('roberta-base-openai-detector', output_hidden_states=True)
 
 model.cuda()
 
 train_df = pd.read_csv("data/train.csv") if not args.holdout else pd.read_csv("data/train_holdout.csv")
 train_df.fillna("NaN",inplace=True)
+def is_bugged(row):
+   if row.selected_text in row.text:
+       start = row.text.index(row.selected_text)
+       if row.text.count("   ",start) > 0:
+           return True
+   return False
+train_df["bugged"] = train_df.apply(is_bugged,axis=1)
+good_ids = train_df[~train_df.bugged].index.values
 
 print(f"Training on {args.use_only}")
 if args.ignore_neutral or args.use_only not in ["all","neutral"]:
@@ -113,6 +125,14 @@ else:
 sentiment_dict = {"negative": 0, "neutral": 1, "positive": 2}
 y_train = np.array([sentiment_dict[x] for x in train_df.sentiment.values])
 
+if args.remove_bad_samples:
+    train_df = train_df[~train_df.bugged].reset_index()
+    X_train = X_train[good_ids]
+    X_type_train = X_type_train[good_ids]
+    X_pos_train = X_pos_train[good_ids]
+    y_train = y_train[good_ids]
+#print(X_train.shape)
+
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
 optimizer_grouped_parameters = [
@@ -124,10 +144,13 @@ num_train_optimization_steps = int(EPOCHS*len(train_df)/batch_size/accumulation_
 
 optimizer = AdamW(optimizer_grouped_parameters, lr=lr, correct_bias=False) 
 scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps)  # PyTorch scheduler
+#scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps)  # PyTorch scheduler
 scheduler0 = get_constant_schedule(optimizer)
 
 if args.model in ["bart"]:
     tsfm = model.model
+if args.model in ["longformer"]:
+    tsfm = model.longformer
 if args.model in ["xlm","xlnet","gpt2","xlnet-large"]:
     tsfm = model.transformer
 if args.model in ["bert","bert-mrpc","bert-large","bert-large-whole-word-masking"]:
@@ -208,10 +231,16 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 if not frozen:
                     scheduler.step()
             pbar.set_postfix(loss = loss.item()*accumulation_steps)
-        torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
+        if not args.remove_bad_samples:
+            torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
+        else:
+            torch.save(model.state_dict(),"models/{}_{}_{}_r.bin".format(args.model, fold,args.seed))
         if args.train_full or epoch < args.stop_after:
             continue
-        model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
+        if not args.remove_bad_samples: 
+            model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
+        else: 
+            model.load_state_dict(torch.load(("models/{}_{}_{}_r.bin".format(args.model, fold,args.seed))))
         model.eval()
         true_texts = train_df.loc[val_idx].selected_text.values
         selected_texts = []
@@ -251,5 +280,12 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, selected_texts)]
         matched_texts = [y if y in x else fuzzy_match(x,y)[1] for x,y in zip(train_df.loc[val_idx].text.values, selected_texts)]
         matched_scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, matched_texts)]
-        print(f"\nRaw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}")
+        bugged_preds = []
+        bugged_labels = []
+        for x,y,z in zip(train_df.loc[val_idx].text.values, true_texts, matched_texts):
+            if "  " in x:
+                bugged_labels.append(y)
+                bugged_preds.append(z)
+        bugged_scores = [jaccard(str1,str2) for str1, str2 in zip(bugged_labels, bugged_preds)]
+        print(f"\nRaw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}, bugged score = {np.mean(bugged_scores):.4f}")
         break

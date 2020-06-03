@@ -8,6 +8,34 @@ from fuzzywuzzy import fuzz
 import itertools
 from scipy.special import softmax
 from transformers.tokenization_bert import BasicTokenizer
+import math 
+
+def fix_prediction(text, prediction):
+    prediction=prediction.strip()
+    if prediction not in text:
+        return prediction
+    if " "+prediction in text:
+        prediction = " "+prediction
+    if prediction+" " in text:
+        prediction = prediction+" "
+    start,end = text.index(prediction), text.index(prediction) + len(prediction)
+    if start == 0 or (" " not in text[:start]):
+        return prediction
+    is_end = end >= len(text)
+    x = text[:start]
+    if x[0].isspace():
+        x = "<dummy>" + x
+    if x[-1].isspace():
+        x = x+"<dummy>"
+    n_spaces = np.sum([i.isspace() for i in x[:start]])
+    shift = n_spaces - len(x.split())
+    if shift <= 0:
+        return prediction
+    else:
+        if is_end:
+            return text[start - shift:]
+        else:
+            return text[start-shift: end-shift]
 
 def jaccard(str1, str2): 
     if type(str1) is str:
@@ -69,7 +97,6 @@ def find_best_combinations(start_top_log_probs, start_top_index, end_top_log_pro
     return best
 
 special_tokens = {"positive": "[POS]", "negative":"[NEG]", "neutral": "[NTR]"}
-
 
 basic_tokenizer = BasicTokenizer(do_lower_case=False)
 def fix_spaces(t):
@@ -166,9 +193,8 @@ def convert_lines_xlnet(tokenizer, df, max_sequence_length = 512):
     position_outputs = np.zeros((len(df), 2))
     extracted = []
     for idx, row in tqdm(df.iterrows(), total=len(df)): 
-#        input_ids_0 = tokenizer.encode(special_tokens[row.sentiment], add_special_tokens=False) 
-        input_ids_0 = tokenizer.encode(row.sentiment.strip(), add_special_tokens=False) 
-        input_ids_1 = tokenizer.encode(row.text, add_special_tokens=False) 
+        input_ids_0 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer, row.sentiment)) 
+        input_ids_1 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer, row.text)) 
         input_ids =  input_ids_0 +  [tokenizer.sep_token_id, ] + input_ids_1 + [tokenizer.sep_token_id, ] + [tokenizer.cls_token_id, ]
         token_type_ids = [0,]*(len(input_ids_0) + 1) + [1,]*(len(input_ids_1) + 2)
 
@@ -186,14 +212,12 @@ def convert_lines_xlnet(tokenizer, df, max_sequence_length = 512):
         type_outputs[idx,:] = token_type_ids
         selected_text = row.selected_text.strip()
         if " "+selected_text in row.text:
-            input_ids_2 = tokenizer.encode(" "+selected_text, add_special_tokens=False)
+            input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer," "+selected_text))
         else:
-            input_ids_2 = tokenizer.encode(selected_text, add_special_tokens=False)
+            input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer,selected_text))
         start_idx, end_idx = get_sub_idx(input_ids_1, input_ids_2)
         extracted.append(tokenizer.decode(input_ids_1[start_idx:end_idx]))
         position_outputs[idx,:] = [start_idx + len(input_ids_0) + 1, end_idx + len(input_ids_0) + 1]
-#    df["extracted"] = extracted
-#    df.to_csv("extracted.csv",index=False)
     type_outputs[outputs == tokenizer.cls_token_id] = 2
     type_outputs[outputs == pad_token_idx] = 4
     return outputs, type_outputs, position_outputs
