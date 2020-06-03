@@ -1,5 +1,0 @@
-python train.py  --model bart  --batch_size 8 --accumulation_steps 12 --fold 0 --seed 41 --epochs 3 --beam_size 3 --devices '2'
-python train.py  --model bart  --batch_size 8 --accumulation_steps 12 --fold 1 --seed 41 --epochs 3 --beam_size 3 --devices '2'
-python train.py  --model bart  --batch_size 8 --accumulation_steps 12 --fold 2 --seed 41 --epochs 3 --beam_size 3 --devices '2'
-python train.py  --model bart  --batch_size 8 --accumulation_steps 12 --fold 3 --seed 41 --epochs 3 --beam_size 3 --devices '2'
-python train.py  --model bart  --batch_size 8 --accumulation_steps 12 --fold 4 --seed 41 --epochs 3 --beam_size 3 --devices '2'
