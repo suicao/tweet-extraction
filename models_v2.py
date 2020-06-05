@@ -52,8 +52,19 @@ class PoolerEndLogitsV2(nn.Module):
             start_positions = start_positions[:, None, None].expand(-1, -1, hsz)  # shape (bsz, 1, hsz)
             start_states = hidden_states.gather(-2, start_positions)  # shape (bsz, 1, hsz)
             start_states = start_states.expand(-1, slen, -1)  # shape (bsz, slen, hsz)
-
-        x = self.dense_0(torch.cat([hidden_states, start_states], dim=-1))
+        else:
+            beam_size = hidden_states.shape[2]
+            hidden_states = hidden_states.transpose(1,2)
+            hidden_states = hidden_states.reshape(-1, hidden_states.shape[-2], hidden_states.shape[-1])
+            start_states = start_states.transpose(1,2)
+            start_states = start_states.reshape(-1, start_states.shape[-2], start_states.shape[-1])
+        x, _ = self.rnn_end0(torch.cat([hidden_states, start_states], dim=-1))
+        x = x.reshape(x.shape[0],x.shape[1],x.shape[2]//2,2).sum(-1)
+        if start_positions is None:
+            x = x.reshape(int(x.shape[0]/beam_size),beam_size,x.shape[1],x.shape[2])        
+            x = x.transpose(1,2)
+        x = self.act_end0(x)
+        x = self.dense_0(x)
         x = self.activation(x)
         x = self.LayerNorm(x)
         x = self.dense_1(x).squeeze(-1)

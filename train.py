@@ -29,7 +29,6 @@ parser.add_argument('--max_sequence_length', type=int, default=128)
 parser.add_argument('--accumulation_steps', type=int, default=1)
 
 parser.add_argument('--epochs', type=int, default=4)
-parser.add_argument('--stop_after', type=int, default=3)
 parser.add_argument('--seed', type=int, default=13)
 #parser.add_argument('--pretrained_path', type=str, default="../zalo-bert/output/checkpoint-43000/pytorch_model.bin")
 parser.add_argument('--pretrained_path', type=str, default=None)
@@ -66,6 +65,9 @@ torch.backends.cudnn.deterministic = True
 if args.model == "roberta":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-base', output_hidden_states=True)
+if args.model == "distilroberta":
+    tokenizer = RobertaTokenizer.from_pretrained('distilroberta-base')
+    model = RobertaForSentimentExtraction.from_pretrained('distilroberta-base', output_hidden_states=True)
 if args.model == "longformer":
     tokenizer = LongformerTokenizer.from_pretrained('allenai/longformer-base-4096')
     model = LongformerForSentimentExtraction.from_pretrained('allenai/longformer-base-4096', output_hidden_states=True)
@@ -73,8 +75,8 @@ if args.model == "roberta-squad":
     tokenizer = RobertaTokenizer.from_pretrained("deepset/roberta-base-squad2")
     model = RobertaForSentimentExtraction.from_pretrained("deepset/roberta-base-squad2", output_hidden_states=True)
 if args.model == "bart":
-    tokenizer = BartTokenizer.from_pretrained('bart-large')
-    model = BartForSentimentExtraction.from_pretrained('bart-large', output_hidden_states=True)
+    tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
+    model = BartForSentimentExtraction.from_pretrained('facebook/bart-large', output_hidden_states=True)
 elif args.model == "xlnet":
     tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
     model = XLNetForSentimentExtraction.from_pretrained('xlnet-base-cased', output_hidden_states=True)
@@ -104,7 +106,6 @@ def is_bugged(row):
 train_df["bugged"] = train_df.apply(is_bugged,axis=1)
 good_ids = train_df[~train_df.bugged].index.values
 
-print(f"Training on {args.use_only}")
 if args.ignore_neutral or args.use_only not in ["all","neutral"]:
     train_df = train_df[train_df.sentiment != "neutral"].reset_index()
     #print(train_df.head())
@@ -157,7 +158,7 @@ if args.model in ["bert","bert-mrpc","bert-large","bert-large-whole-word-masking
     tsfm = model.bert
 if args.model in ["albert"]:
     tsfm = model.albert
-if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large","roberta-squad"]:
+if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large","roberta-squad","distilroberta"]:
     tsfm = model.roberta
 
 if not args.stratified:
@@ -183,7 +184,7 @@ for fold, (train_idx, val_idx) in enumerate(splits):
     valid_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[val_idx],dtype=torch.long), torch.tensor(X_type_train[val_idx],dtype=torch.long),\
                 torch.tensor(X_pos_train[val_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[val_idx,1],dtype=torch.long))
     best_score = 0
-    tq = tqdm(range(args.stop_after + 1))
+    tq = tqdm(range(args.epochs + 1))
     for child in tsfm.children():
         for param in child.parameters():
             param.requires_grad = False
@@ -235,7 +236,7 @@ for fold, (train_idx, val_idx) in enumerate(splits):
             torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
         else:
             torch.save(model.state_dict(),"models/{}_{}_{}_r.bin".format(args.model, fold,args.seed))
-        if args.train_full or epoch < args.stop_after:
+        if args.train_full or epoch < args.epochs:
             continue
         if not args.remove_bad_samples: 
             model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
@@ -287,5 +288,5 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 bugged_labels.append(y)
                 bugged_preds.append(z)
         bugged_scores = [jaccard(str1,str2) for str1, str2 in zip(bugged_labels, bugged_preds)]
-        print(f"\nRaw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}, bugged score = {np.mean(bugged_scores):.4f}")
+        print(f"\nFold {fold}, Raw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}")
         break

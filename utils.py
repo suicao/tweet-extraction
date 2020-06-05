@@ -186,6 +186,72 @@ def convert_lines_v2(tokenizer, df, max_sequence_length = 512):
 #    df[["text","selected_text","extracted"]].to_csv("extracted.csv",index=False)
     return outputs, type_outputs, position_outputs
 
+def contains(small, big):
+    for i in range(len(big)-len(small)+1):
+        for j in range(len(small)):
+            if big[i+j] != small[j]:
+                break
+        else:
+            return i, i+len(small)
+    return None
+
+def exhausted_get_sub_idx(text, selected_text, tokenizer, input_ids_1):
+    if selected_text not in text:
+        input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer,selected_text))
+        start_idx, end_idx = get_sub_idx(input_ids_1, input_ids_2)
+        return start_idx, end_idx
+    else:
+        begin, end = text.index(selected_text), text.index(selected_text) + len(selected_text)
+        for offset in range(len(text) - begin):
+            curr_selected = text[begin+offset:end+offset]
+            if " "+curr_selected in text:
+                input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer," "+curr_selected))
+            else:
+                input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer,curr_selected))
+            idxs = contains(input_ids_2, input_ids_1)
+            if idxs is not None:
+#                if selected_text != curr_selected:
+#                    print(f"\n{selected_text}, {curr_selected}")
+                return idxs
+#    print(selected_text)
+    if " "+selected_text in text:
+        input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer," "+selected_text))
+    else:
+        input_ids_2 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer,selected_text))
+    return get_sub_idx(input_ids_1, input_ids_2)
+
+
+def convert_lines_v3(tokenizer, df, max_sequence_length = 512):
+    pad_token_idx = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+    outputs = np.zeros((len(df), max_sequence_length))
+    type_outputs = np.zeros((len(df), max_sequence_length))
+    position_outputs = np.zeros((len(df), 2))
+    extracted = []
+    for idx, row in tqdm(df.iterrows(), total=len(df)): 
+        input_ids_0 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer, row.sentiment)) 
+        input_ids_1 = tokenizer.convert_tokens_to_ids(roberta_tokenize_v2(tokenizer, row.text)) 
+        input_ids = [tokenizer.cls_token_id, ]+ input_ids_0 +  [tokenizer.sep_token_id,] +input_ids_1 + [tokenizer.sep_token_id, ]
+        token_type_ids = [0,]*(len(input_ids_0) + 1) + [1,]*(len(input_ids_1) + 2)
+
+        if len(input_ids) > max_sequence_length: 
+#            input_ids = input_ids[:max_sequence_length//2] + input_ids[-max_sequence_length//2:] 
+            input_ids = input_ids[:max_sequence_length]
+            input_ids[-1] = tokenizer.sep_token_id
+            token_type_ids = token_type_ids[:max_sequence_length]
+        else:
+            input_ids = input_ids + [pad_token_idx, ]*(max_sequence_length - len(input_ids))
+            token_type_ids = token_type_ids + [pad_token_idx, ]*(max_sequence_length - len(token_type_ids))
+        assert len(input_ids) == len(token_type_ids)
+        outputs[idx,:max_sequence_length] = np.array(input_ids)
+        type_outputs[idx,:] = token_type_ids
+        selected_text = row.selected_text.strip()
+        start_idx, end_idx = exhausted_get_sub_idx(row.text, selected_text, tokenizer,input_ids_1)
+        extracted.append(tokenizer.decode(input_ids_1[start_idx:end_idx]))
+        position_outputs[idx,:] = [start_idx + len(input_ids_0) + 2, end_idx + len(input_ids_0) + 2]
+#    df["extracted"] = extracted
+#    df[["text","selected_text","extracted"]].to_csv("extracted.csv",index=False)
+    return outputs, type_outputs, position_outputs
+
 def convert_lines_xlnet(tokenizer, df, max_sequence_length = 512):
     pad_token_idx = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
     outputs = np.zeros((len(df), max_sequence_length))
@@ -221,28 +287,3 @@ def convert_lines_xlnet(tokenizer, df, max_sequence_length = 512):
     type_outputs[outputs == tokenizer.cls_token_id] = 2
     type_outputs[outputs == pad_token_idx] = 4
     return outputs, type_outputs, position_outputs
-
-def convert_lines_cls(tokenizer, df, max_sequence_length = 512):
-    pad_token_idx = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
-    outputs = np.zeros((len(df), max_sequence_length))
-    type_outputs = np.zeros((len(df), max_sequence_length))
-    for idx, row in tqdm(df.iterrows(), total=len(df)): 
-        input_ids = tokenizer.encode(row.text, add_special_tokens=False) 
-        input_ids = [tokenizer.cls_token_id, ]+ input_ids +  [tokenizer.sep_token_id, ] 
-        token_type_ids = [0,]*(len(input_ids)) 
-
-        if len(input_ids) > max_sequence_length: 
-#            input_ids = input_ids[:max_sequence_length//2] + input_ids[-max_sequence_length//2:] 
-            input_ids = input_ids[:max_sequence_length]
-            input_ids[-1] = tokenizer.sep_token_id
-            token_type_ids = token_type_ids[:max_sequence_length]
-        else:
-            input_ids = input_ids + [pad_token_idx, ]*(max_sequence_length - len(input_ids))
-            token_type_ids = token_type_ids + [pad_token_idx, ]*(max_sequence_length - len(token_type_ids))
-        if len(input_ids) != len(token_type_ids):
-            print(input_ids, token_type_ids)
-        outputs[idx,:max_sequence_length] = np.array(input_ids)
-        type_outputs[idx,:] = token_type_ids
-    return outputs, type_outputs
-
-
