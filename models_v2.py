@@ -15,7 +15,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 class PoolerStartLogitsV2(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.rnn_start0 = nn.GRU(config.hidden_size, config.hidden_size, num_layers=3, batch_first=True, bidirectional=True)
+        self.rnn_start0 = nn.GRU(config.hidden_size, config.hidden_size, num_layers=2, batch_first=True, bidirectional=True)
         self.act_start0 = nn.ReLU()
         self.dense = nn.Linear(config.hidden_size, 1)
         
@@ -37,7 +37,7 @@ class PoolerStartLogitsV2(nn.Module):
 class PoolerEndLogitsV2(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.rnn_end0 = nn.GRU(2*config.hidden_size, 2*config.hidden_size, num_layers=3, batch_first=True, bidirectional=True)
+        self.rnn_end0 = nn.GRU(2*config.hidden_size, 2*config.hidden_size, num_layers=1, batch_first=True, bidirectional=True)
         self.act_end0 = nn.ReLU()
         self.dense_0 = nn.Linear(config.hidden_size*2, config.hidden_size)
         self.dense_1 = nn.Linear(config.hidden_size, 1)
@@ -87,9 +87,17 @@ class RobertaForSentimentExtractionV2(BertPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.start_logits = PoolerStartLogitsV2(config)
         self.end_logits = PoolerEndLogitsV2(config)
-
+        self.transformer = self.roberta
         self.init_weights()
-        
+
+    def freeze(self):
+        for child in self.transformer.children():
+            for param in child.parameters():
+            	param.requires_grad = False
+    def unfreeze(self):
+    	for child in self.transformer.children():
+    	    for param in child.parameters():
+                param.requires_grad = True
 
     def forward(
         self, beam_size=1, cls_ids=None,

@@ -71,7 +71,36 @@ class RobertaForSentimentExtraction(BertPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.start_logits = PoolerStartLogits(config)
         self.end_logits = PoolerEndLogits(config)
+#        self.transformer = self.roberta
         self.init_weights()
+#        self.weights_init_custom()
+
+    def freeze(self):
+        for child in self.roberta.children():
+            for param in child.parameters():
+                param.requires_grad = False
+
+    def unfreeze(self):
+        for child in self.roberta.children():
+            for param in child.parameters():
+                param.requires_grad = True
+
+    def weights_init_custom(self):
+        init_layers = [9, 10, 11]
+        dense_names = ["query", "key", "value", "dense"]
+        layernorm_names = ["LayerNorm"]
+        for name, module in self.transformer.named_parameters():
+            if any(f".{i}." in name for i in init_layers):
+                if any(n in name for n in dense_names):
+                    if "bias" in name:
+                        module.data.zero_()
+                    elif "weight" in name:
+                        module.data.normal_(mean=0.0, std=self.config.initializer_range)
+                elif any(n in name for n in layernorm_names):
+                    if "bias" in name:
+                        module.data.zero_()
+                    elif "weight" in name:
+                        module.data.fill_(1.0)
 
     def forward(
         self, beam_size=1, cls_ids=None,
@@ -87,8 +116,8 @@ class RobertaForSentimentExtraction(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
         )
 
-        hidden_states = outputs[0]
-#        hidden_states = torch.cat((outputs[2][-1],outputs[2][-2], outputs[2][-3], outputs[2][-4]),-1)
+        hidden_states = outputs[2][-3]
+#        hidden_states = torch.mean(torch.stack((outputs[2][-1],outputs[2][-2], outputs[2][-3], outputs[2][-4])),0)
         start_logits = self.start_logits(hidden_states, p_mask=p_mask)
 
         outputs = outputs[1:]  # Keep mems, hidden states, attentions if there are in it
@@ -353,6 +382,17 @@ class BartForSentimentExtraction(PretrainedBartModel):
         self.model = BartModel(config)
         self.init_weights()
 
+    def freeze(self):
+        for child in self.model.children():
+            for param in child.parameters():
+                param.requires_grad = False
+
+    def unfreeze(self):
+        for child in self.model.children():
+            for param in child.parameters():
+                param.requires_grad = True
+
+
     def forward(
         self, beam_size=1, cls_ids=None,
         input_ids=None,attention_mask=None,token_type_ids=None,input_mask=None,position_ids=None,
@@ -363,7 +403,9 @@ class BartForSentimentExtraction(PretrainedBartModel):
             attention_mask=attention_mask,
         )
 
-        hidden_states = outputs[0]
+        hidden_states = outputs[1][-3]
+#        hidden_states = outputs[0]
+#        print(hidden_states.shape)
 #        hidden_states = torch.cat((outputs[2][-1],outputs[2][-2], outputs[2][-3], outputs[2][-4]),-1)
         start_logits = self.start_logits(hidden_states, p_mask=p_mask)
 
@@ -413,3 +455,26 @@ class BartForSentimentExtraction(PretrainedBartModel):
             outputs = start_top_log_probs, start_top_index, end_top_log_probs, end_top_index
 
         return outputs
+    
+class RobertaSentimentClassification(BertPreTrainedModel):
+    config_class = RobertaConfig
+    base_model_prefix = "roberta"
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.roberta = RobertaModel(config)
+        self.qa_outputs = nn.Linear(config.hidden_size, self.num_labels)
+
+        self.init_weights()
+
+    def forward(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
+                start_positions=None, end_positions=None):
+
+        outputs = self.roberta(input_ids,
+                            attention_mask=attention_mask,
+                            position_ids=position_ids,
+                            head_mask=head_mask)
+#        cls_output = torch.cat((outputs[2][-1][:,0, ...],outputs[2][-2][:,0, ...], outputs[2][-3][:,0, ...], outputs[2][-4][:,0, ...]),-1)
+        cls_output = outputs[2][-1][:,0, ...]
+        logits = self.qa_outputs(cls_output)
+        return logits

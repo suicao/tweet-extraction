@@ -1,5 +1,15 @@
-python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 0 --seed 13 --epochs 3 --train_full
-python train.py  --model xlmr --batch_size 32 --accumulation_steps 3 --fold 0 --seed 23 --epochs 3 --train_full
-python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 0 --seed 33 --epochs 3 --train_full
-python train.py  --model roberta-detector --batch_size 8 --accumulation_steps 12 --fold 0 --seed 43 --epochs 3 --train_full
-python train.py  --model xlmr-large --batch_size 4 --accumulation_steps 12 --fold 0 --seed 53 --epochs 3 --train_full
+python train.py  --model bart --batch_size 8 --accumulation_steps 12 --fold 0 --seed 113 --epochs 3 --beam_size 3 --devices '1' --lr 2e-5 --train_full 
+python train.py  --model bart --batch_size 8 --accumulation_steps 12 --fold 1 --seed 123 --epochs 3 --beam_size 3 --devices '1' --lr 2e-5 --train_full
+python train.py  --model bart --batch_size 8 --accumulation_steps 12 --fold 2 --seed 133 --epochs 3 --beam_size 3 --devices '1' --lr 2e-5 --train_full
+python train.py  --model bart --batch_size 8 --accumulation_steps 12 --fold 3 --seed 143 --epochs 3 --beam_size 3 --devices '1' --lr 2e-5 --train_full
+python train.py  --model bart --batch_size 8 --accumulation_steps 12 --fold 4 --seed 153 --epochs 3 --beam_size 3 --devices '1' --lr 2e-5 --train_full
+python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 0 --seed 63 --epochs 3 --beam_size 3 --devices '2' --lr 2e-5 --train_full 
+python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 1 --seed 73 --epochs 3 --beam_size 3 --devices '2' --lr 2e-5 --train_full
+python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 2 --seed 83 --epochs 3 --beam_size 3 --devices '2' --lr 2e-5 --train_full
+python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 3 --seed 93 --epochs 3 --beam_size 3 --devices '2' --lr 2e-5 --train_full
+python train.py  --model roberta-large --batch_size 8 --accumulation_steps 12 --fold 4 --seed 103 --epochs 3 --beam_size 3 --devices '2' --lr 2e-5 --train_full
+python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 0 --seed 13 --epochs 3 --beam_size 3 --devices '7' --lr 2e-5 --train_full 
+python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 1 --seed 23 --epochs 3 --beam_size 3 --devices '7' --lr 2e-5 --train_full
+python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 2 --seed 33 --epochs 3 --beam_size 3 --devices '7' --lr 2e-5 --train_full
+python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 3 --seed 43 --epochs 3 --beam_size 3 --devices '7' --lr 2e-5 --train_full
+python train.py  --model roberta --batch_size 32 --accumulation_steps 3 --fold 4 --seed 53 --epochs 3 --beam_size 3 --devices '7' --lr 2e-5 --train_full

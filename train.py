@@ -16,11 +16,10 @@ import argparse
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--fold', type=int, default=0)
 parser.add_argument('--train_full', action='store_true')
-parser.add_argument('--ignore_neutral', action='store_true')
 parser.add_argument('--holdout', action='store_true')
-parser.add_argument('--remove_bad_samples', action='store_true')
 parser.add_argument('--stratified', action='store_true')
-parser.add_argument('--use_only', type=str, default='all')
+parser.add_argument('--extra_sentiment', action='store_true')
+parser.add_argument('--pl', action='store_true')
 parser.add_argument('--devices', default='7')
 parser.add_argument('--lr', type=float, default=2e-5)
 parser.add_argument('--batch_size', type=int, default=32)
@@ -65,18 +64,19 @@ torch.backends.cudnn.deterministic = True
 if args.model == "roberta":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-base', output_hidden_states=True)
-if args.model == "distilroberta":
-    tokenizer = RobertaTokenizer.from_pretrained('distilroberta-base')
-    model = RobertaForSentimentExtraction.from_pretrained('distilroberta-base', output_hidden_states=True)
+if args.model == "bertweet":
+    tokenizer = BERTweetTokenizer(pretrained_path = './bertweet/')
+    config = RobertaConfig.from_pretrained("./bertweet/config.json")
+    model = RobertaForSentimentExtraction.from_pretrained('./bertweet/model.bin', config=config)
 if args.model == "longformer":
     tokenizer = LongformerTokenizer.from_pretrained('allenai/longformer-base-4096')
     model = LongformerForSentimentExtraction.from_pretrained('allenai/longformer-base-4096', output_hidden_states=True)
-if args.model == "roberta-squad":
-    tokenizer = RobertaTokenizer.from_pretrained("deepset/roberta-base-squad2")
-    model = RobertaForSentimentExtraction.from_pretrained("deepset/roberta-base-squad2", output_hidden_states=True)
-if args.model == "bart":
+if args.model == "bart-large":
     tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     model = BartForSentimentExtraction.from_pretrained('facebook/bart-large', output_hidden_states=True)
+if args.model == "bart":
+    tokenizer = BartTokenizer.from_pretrained('./bart-configs')
+    model = BartForSentimentExtraction.from_pretrained('./bart-configs', output_hidden_states=True)
 elif args.model == "xlnet":
     tokenizer = XLNetTokenizer.from_pretrained('xlnet-base-cased')
     model = XLNetForSentimentExtraction.from_pretrained('xlnet-base-cased', output_hidden_states=True)
@@ -89,77 +89,51 @@ elif args.model == "xlmr-large":
 elif args.model == "roberta-large":
     tokenizer = RobertaTokenizer.from_pretrained('roberta-large')
     model = RobertaForSentimentExtraction.from_pretrained('roberta-large', output_hidden_states=True)
-elif args.model == "roberta-detector":
-    tokenizer = RobertaTokenizer.from_pretrained('roberta-base-openai-detector')
-    model = RobertaForSentimentExtraction.from_pretrained('roberta-base-openai-detector', output_hidden_states=True)
 
 model.cuda()
 
 train_df = pd.read_csv("data/train.csv") if not args.holdout else pd.read_csv("data/train_holdout.csv")
+if args.pl:
+    print("Using pseudo labeling")
+    test_df = pd.read_csv(f"./pseudo_labels/{args.model}_{args.fold}_{args.seed}.csv")
+    train_df = pd.concat([train_df,test_df]).reset_index()
+    train_df = train_df[["textID","text","selected_text","sentiment"]]
 train_df.fillna("NaN",inplace=True)
-def is_bugged(row):
-   if row.selected_text in row.text:
-       start = row.text.index(row.selected_text)
-       if row.text.count("   ",start) > 0:
-           return True
-   return False
-train_df["bugged"] = train_df.apply(is_bugged,axis=1)
-good_ids = train_df[~train_df.bugged].index.values
+if args.extra_sentiment:
+    extra_df = pd.read_csv("data/tweet_dataset.csv").set_index("aux_id")
+    for idx, row in tqdm(train_df.iterrows(),total=len(train_df)):
+        if row.textID not in extra_df.index:
+            print(row.textID)
+            continue
+    train_df.loc[idx, "sentiment"] = row.sentiment + " " + extra_df.loc[row.textID].sentiment
 
-if args.ignore_neutral or args.use_only not in ["all","neutral"]:
-    train_df = train_df[train_df.sentiment != "neutral"].reset_index()
-    #print(train_df.head())
-
-if os.path.exists(f"./data/X_train_{args.model}.npy"):
+if os.path.exists(f"./data/X_train_{args.model}.npy") and (not args.pl):
     print("Loading cached input ids")
-    X_train, X_type_train, X_pos_train = np.load(f"./data/X_train_{args.model}.npy"), np.load(f"./data/X_type_train_{args.model}.npy"), np.load(f"./data/X_pos_train_{args.model}.npy")
+    X_train, X_type_train, X_pos_train, X_offset_train = \
+        np.load(f"./data/X_train_{args.model}.npy"), np.load(f"./data/X_type_train_{args.model}.npy"), np.load(f"./data/X_pos_train_{args.model}.npy"), np.load(f"./data/X_offset_train_{args.model}.npy")
 else:
     print("Creating input ids")
     if args.model not in ["xlnet","xlnet-large"]:
-        X_train, X_type_train, X_pos_train = convert_lines_v2(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
+        X_train, X_type_train, X_pos_train, X_offset_train = convert_lines_v2(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
     else:
         X_train, X_type_train, X_pos_train = convert_lines_xlnet(tokenizer, train_df, max_sequence_length=args.max_sequence_length)
     np.save(f"./data/X_train_{args.model}.npy", X_train) 
     np.save(f"./data/X_type_train_{args.model}.npy", X_type_train)
     np.save(f"./data/X_pos_train_{args.model}.npy", X_pos_train)
-
-sentiment_dict = {"negative": 0, "neutral": 1, "positive": 2}
-y_train = np.array([sentiment_dict[x] for x in train_df.sentiment.values])
-
-if args.remove_bad_samples:
-    train_df = train_df[~train_df.bugged].reset_index()
-    X_train = X_train[good_ids]
-    X_type_train = X_type_train[good_ids]
-    X_pos_train = X_pos_train[good_ids]
-    y_train = y_train[good_ids]
-#print(X_train.shape)
+    np.save(f"./data/X_offset_train_{args.model}.npy", X_offset_train)
 
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
 optimizer_grouped_parameters = [
     {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
+   ]
 
 num_train_optimization_steps = int(EPOCHS*len(train_df)/batch_size/accumulation_steps)
 
 optimizer = AdamW(optimizer_grouped_parameters, lr=lr, correct_bias=False) 
-scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps)  # PyTorch scheduler
-#scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps)  # PyTorch scheduler
+scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*num_train_optimization_steps, num_training_steps=num_train_optimization_steps) 
 scheduler0 = get_constant_schedule(optimizer)
-
-if args.model in ["bart"]:
-    tsfm = model.model
-if args.model in ["longformer"]:
-    tsfm = model.longformer
-if args.model in ["xlm","xlnet","gpt2","xlnet-large"]:
-    tsfm = model.transformer
-if args.model in ["bert","bert-mrpc","bert-large","bert-large-whole-word-masking"]:
-    tsfm = model.bert
-if args.model in ["albert"]:
-    tsfm = model.albert
-if args.model in ["roberta","xlmr","xlmr-large","roberta-detector","roberta-large","roberta-squad","distilroberta"]:
-    tsfm = model.roberta
 
 if not args.stratified:
     splits = list(KFold(n_splits=5, shuffle=True, random_state=args.seed).split(X_train, np.arange(len(X_train))))
@@ -176,24 +150,17 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         model.load_state_dict(torch.load(args.pretrained_path),strict=False)
     if args.train_full:
         train_idx = np.arange(len(X_train))
-    if args.use_only != "all":
-        train_idx = np.array([idx for idx in train_idx if train_df.loc[idx].sentiment == args.use_only])
-        val_idx = np.array([idx for idx in val_idx if train_df.loc[idx].sentiment == args.use_only])
     train_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[train_idx],dtype=torch.long),torch.tensor(X_type_train[train_idx],dtype=torch.long),\
-                torch.tensor(X_pos_train[train_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[train_idx, 1],dtype=torch.long)) #,torch.tensor(y_train[train_idx],dtype=torch.long))
+                torch.tensor(X_pos_train[train_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[train_idx, 1],dtype=torch.long), torch.tensor(X_offset_train[train_idx],dtype=torch.long))
     valid_dataset = torch.utils.data.TensorDataset(torch.tensor(X_train[val_idx],dtype=torch.long), torch.tensor(X_type_train[val_idx],dtype=torch.long),\
-                torch.tensor(X_pos_train[val_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[val_idx,1],dtype=torch.long))
+                torch.tensor(X_pos_train[val_idx, 0],dtype=torch.long), torch.tensor(X_pos_train[val_idx,1],dtype=torch.long),torch.tensor(X_offset_train[val_idx],dtype=torch.long))
     best_score = 0
     tq = tqdm(range(args.epochs + 1))
-    for child in tsfm.children():
-        for param in child.parameters():
-            param.requires_grad = False
+    model.freeze()
     frozen = True
     for epoch in tq:
         if epoch > 0 and frozen:
-            for child in tsfm.children():
-                for param in child.parameters():
-                    param.requires_grad = True
+            model.unfreeze()
             frozen = False
             del scheduler0
             torch.cuda.empty_cache()
@@ -205,22 +172,16 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         pbar = tqdm(enumerate(train_loader),total=len(train_loader),leave=False)
         model.train()
         for i, items in pbar:
-            x_batch, x_type_batch, x_start_batch, x_end_batch  = items
-            x_batch = x_batch.clone()
-            for i_ in range(x_batch.shape[0]):
-                if np.random.rand() < 0.4:
-                    x_batch[i_, 1] = tokenizer.unk_token_id
+            x_batch, x_type_batch, x_start_batch, x_end_batch,x_offset_batch = items
             p_mask = torch.zeros(x_batch.shape,dtype=torch.float32)
             p_mask[x_batch == tokenizer.pad_token_id] = 1.0
             p_mask[x_batch == tokenizer.cls_token_id] = 1.0
-
             if args.model in ["xlnet","xlnet-large"]:
                 attention_mask=(x_batch != tokenizer.pad_token_id).float().cuda()
-                p_mask[:,:2] = 1.0
             else:
                 attention_mask=(x_batch != tokenizer.pad_token_id).cuda()
-                p_mask[:,:3] = 1.0
-
+            for i_ in range(len(x_batch)):
+                p_mask[i_, :x_offset_batch[i_]] = 1.0
             loss = model(input_ids=x_batch.cuda(), start_positions = x_start_batch.cuda(), end_positions = x_end_batch.cuda(), \
                                     attention_mask=attention_mask, token_type_ids=x_type_batch.cuda(),p_mask=p_mask.cuda()) #,cls_ids=y_batch)
             loss /= accumulation_steps
@@ -232,16 +193,10 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 if not frozen:
                     scheduler.step()
             pbar.set_postfix(loss = loss.item()*accumulation_steps)
-        if not args.remove_bad_samples:
-            torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
-        else:
-            torch.save(model.state_dict(),"models/{}_{}_{}_r.bin".format(args.model, fold,args.seed))
+        torch.save(model.state_dict(),"models/{}_{}_{}.bin".format(args.model, fold,args.seed))
         if args.train_full or epoch < args.epochs:
             continue
-        if not args.remove_bad_samples: 
-            model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
-        else: 
-            model.load_state_dict(torch.load(("models/{}_{}_{}_r.bin".format(args.model, fold,args.seed))))
+        model.load_state_dict(torch.load(("models/{}_{}_{}.bin".format(args.model, fold,args.seed))))
         model.eval()
         true_texts = train_df.loc[val_idx].selected_text.values
         selected_texts = []
@@ -249,16 +204,16 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         # with torch.no_grad():
         pbar = tqdm(enumerate(valid_loader),total=len(valid_loader),leave=False)
         for i, items in pbar:
-            x_batch, x_type_batch, x_start_batch, x_end_batch = items
+            x_batch, x_type_batch, x_start_batch, x_end_batch,x_offset_batch = items
             p_mask = torch.zeros(x_batch.shape,dtype=torch.float32)
             p_mask[x_batch == tokenizer.pad_token_id] = 1.0
             p_mask[x_batch == tokenizer.cls_token_id] = 1.0
+            for i_ in range(len(x_batch)):
+                p_mask[i_, :x_offset_batch[i_]] = 1.0
             if args.model in ["xlnet","xlnet-large"]:
                 attention_mask=(x_batch != tokenizer.pad_token_id).float().cuda()
-                p_mask[:,:2] = 1.0
             else:
                 attention_mask=(x_batch != tokenizer.pad_token_id).cuda()
-                p_mask[:,:3] = 1.0
             start_top_log_probs, start_top_index, end_top_log_probs, end_top_index = model(input_ids=x_batch.cuda(), attention_mask= attention_mask, \
                                                                                             token_type_ids=x_type_batch.cuda(),p_mask = p_mask.cuda(), beam_size=args.beam_size)
             start_top_log_probs = start_top_log_probs.detach().cpu().numpy()
@@ -268,10 +223,9 @@ for fold, (train_idx, val_idx) in enumerate(splits):
             for i_, x in enumerate(x_batch):
                 x = x.numpy()
                 real_length = np.sum(x != tokenizer.pad_token_id)
-                valid_start = 3
+                valid_start = x_offset_batch[i_]
                 if args.model in ["xlnet","xlnet-large"]:
                     real_length -= 1
-                    valid_start = 2
                 best_start, best_end = find_best_combinations(start_top_log_probs[i_], start_top_index[i_], \
                                                                 end_top_log_probs[i_].reshape(args.beam_size,args.beam_size), end_top_index[i_].reshape(args.beam_size,args.beam_size), \
                                                                 valid_start = valid_start, valid_end = real_length)
@@ -280,6 +234,9 @@ for fold, (train_idx, val_idx) in enumerate(splits):
         scores = []
         scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, selected_texts)]
         matched_texts = [y if y in x else fuzzy_match(x,y)[1] for x,y in zip(train_df.loc[val_idx].text.values, selected_texts)]
+#        train_df.loc[val_idx, "selected_text"] = selected_texts
+#        train_df.loc[val_idx, "matched_text"] = matched_texts
+#        train_df.loc[val_idx][["textID","selected_text","matched_text"]].to_csv(f"preds_dieter/{args.model}_{fold}.csv",index=False)
         matched_scores = [jaccard(str1,str2) for str1, str2 in zip(true_texts, matched_texts)]
         bugged_preds = []
         bugged_labels = []
@@ -289,4 +246,4 @@ for fold, (train_idx, val_idx) in enumerate(splits):
                 bugged_preds.append(z)
         bugged_scores = [jaccard(str1,str2) for str1, str2 in zip(bugged_labels, bugged_preds)]
         print(f"\nFold {fold}, Raw score = {np.mean(scores):.4f}, matched score = {np.mean(matched_scores):.4f}")
-        break
+#        break
