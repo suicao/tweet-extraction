@@ -1,4 +1,5 @@
-# Part of 3rd place solution for Kaggle's Tweet Sentiment Extraction
+# Tweet Sentiment Extraction
+Part of 3rd place solution for Kaggle's Tweet Sentiment Extraction
 Write up:
 
 https://www.kaggle.com/c/tweet-sentiment-extraction/discussion/159269
